@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: backend-certificat
+    runtime: docker
+    region: oregon
+    plan: free
+    envVars:
+      - key: APP_KEY
+        sync: false
+      - key: APP_DEBUG
+        value: "true"
