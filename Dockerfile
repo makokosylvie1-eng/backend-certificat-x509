@@ -27,4 +27,23 @@ RUN sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf
 
 RUN a2enmod rewrite
 
-EXPOSE 80
+EXPOSE 80FROM php:8.4-apache
+
+# Rediriger le DocumentRoot d'Apache vers le dossier public de Laravel
+RUN sed -ri -e 's!/var/www/html!/var/www/html/public!g' /etc/apache2/sites-available/*.conf
+RUN sed -ri -e 's!/var/www/!/var/www/html/public!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
+
+# Activer le module de réécriture d'URL (indispensable pour les routes Laravel)
+RUN a2enmod rewrite
+
+# Définir le répertoire de travail
+WORKDIR /var/www/html
+
+# Copier les fichiers du projet
+COPY . .
+
+# Installer les dépendances Composer
+RUN composer install --no-dev --optimize-autoloader
+
+# Donner les permissions nécessaires à Apache sur storage et bootstrap/cache
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
