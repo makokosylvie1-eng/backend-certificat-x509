@@ -6,11 +6,11 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-// Toutes les routes qui ne commencent pas par /api affichent l'interface Angular
+// Toutes les autres routes affichent l'interface Angular depuis public/browser/
 Route::get('/{any?}', function () {
-    $path = public_path('index.html');
+    $path = public_path('browser/index.html');
     if (file_exists($path)) {
         return file_get_contents($path);
     }
-    return response()->json(['message' => 'Interface Angular non compilée dans public/'], 404);
+    return response()->json(['message' => 'Interface Angular non compilée dans public/browser/'], 404);
 })->where('any', '.*');
