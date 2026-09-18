@@ -3,17 +3,18 @@
 use Illuminate\Support\Facades\Route;
 
 Route::get('/{any?}', function ($any = null) {
-    // Si la requête demande un fichier statique existant (js, css, png, etc.)
-    $path = public_path('browser/' . $any);
+    $path = public_path($any);
+    
+    // Si c'est un fichier statique existant (js, css, favicon, etc.), on le sert
     if ($any && file_exists($path) && !is_dir($path)) {
         return response()->file($path);
     }
 
-    // Sinon, on renvoie index.html pour que le routeur d'Angular prenne le relais
-    $indexPath = public_path('browser/index.html');
+    // Sinon, on renvoie index.html pour Angular
+    $indexPath = public_path('index.html');
     if (file_exists($indexPath)) {
         return file_get_contents($indexPath);
     }
     
-    return response()->json(['message' => 'Interface Angular non compilée dans public/browser/'], 404);
+    return response()->json(['message' => 'Application non trouvee'], 404);
 })->where('any', '.*');
