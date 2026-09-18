@@ -2,9 +2,9 @@
 
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return view('welcome');
-});
+//Route::get('/', function () {
+    //return view('welcome');
+//});
 
 // Toutes les autres routes affichent l'interface Angular depuis public/browser/
 Route::get('/{any?}', function () {
