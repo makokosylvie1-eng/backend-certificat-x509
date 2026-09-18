@@ -8,6 +8,6 @@ export default `<!DOCTYPE html><html lang="en" data-beasties-container><head>
 </style><link rel="stylesheet" href="styles-UEC5XGC6.css" media="print" onload="this.media='all'"><noscript><link rel="stylesheet" href="styles-UEC5XGC6.css"></noscript></head>
 <body>
   <app-root ng-version="22.1.6" ng-server-context="ssg"><div class="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 flex items-center justify-center px-4"><div class="max-w-xl w-full bg-white/10 backdrop-blur-xl p-8 rounded-3xl shadow-2xl text-white text-center border border-white/15"><h1 class="text-3xl font-extrabold mb-4 tracking-tight">Plateforme de Cryptographie X.509</h1><p class="text-slate-300 text-sm mb-8 leading-relaxed"> Bienvenue sur l'outil de diagnostic X.509 (Master 1 Informatique - Groupe 09). </p><button type="button" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-4 px-6 rounded-2xl shadow-lg transition-all duration-200 transform hover:-translate-y-0.5 cursor-pointer flex items-center justify-center gap-2 group"><span>Accéder au Laboratoire d'Analyse</span><span class="text-lg transition-transform group-hover:translate-x-1">→</span></button></div></div><!----><!----></app-root>
-<script src="polyfills-LVNOU2XZ.js" type="module"></script><script src="main-GOGL5RHF.js" type="module"></script>
+<script src="polyfills-LVNOU2XZ.js" type="module"></script><script src="main-WCVHMOUJ.js" type="module"></script>
 
 </body></html>`;
