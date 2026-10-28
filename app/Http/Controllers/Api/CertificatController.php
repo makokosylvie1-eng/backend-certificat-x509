@@ -3,115 +3,145 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class CertificatController extends Controller
 {
-    public function parseCertificate(Request $request)
+    /**
+     * Numéros de série (hexadécimal, sans ":") considérés comme révoqués dans la démo.
+     * Ajoute ici le numéro de série d'un certificat de test pour montrer un cas "révoqué".
+     */
+    private const DEMO_REVOKED_SERIALS = [];
+
+    public function parseCertificate(Request $request): JsonResponse
     {
-        // 1. Validation de la requête
         $request->validate([
-            'certificate' => 'required|string',
+            'certificate' => ['required', 'string', 'max:20000'],
         ]);
 
-        $pem = $request->input('certificate');
+        $pem = trim($request->input('certificate'));
 
-        // 2. Tentative d'analyse avec OpenSSL natif
-        $parsed = @openssl_x509_parse($pem);
+        $cert   = str_contains($pem, '-----BEGIN CERTIFICATE-----') ? @openssl_x509_read($pem) : false;
+        $parsed = $cert ? openssl_x509_parse($cert) : false;
 
-        if ($parsed) {
-            $pubKeyId = openssl_x509_read($pem);
-            $sha256 = $pubKeyId ? openssl_x509_fingerprint($pubKeyId, "sha256") : 'N/A';
-            $sha1 = $pubKeyId ? openssl_x509_fingerprint($pubKeyId, "sha1") : 'N/A';
-
-            $subjectStr = collect($parsed['subject'] ?? [])
-                ->map(fn($v, $k) => "$k=$v")
-                ->implode(', ');
-
-            $issuerStr = collect($parsed['issuer'] ?? [])
-                ->map(fn($v, $k) => "$k=$v")
-                ->implode(', ');
-
-            $formattedSha256 = $sha256 !== 'N/A' ? implode(':', str_split(strtoupper($sha256), 2)) : 'N/A';
-            $formattedSha1 = $sha1 !== 'N/A' ? implode(':', str_split(strtoupper($sha1), 2)) : 'N/A';
-
-            $data = [
-                'subject' => $subjectStr,
-                'issuer' => $issuerStr,
-                'validFrom' => date('Y-m-d H:i:s', $parsed['validFrom_time_t'] ?? time()),
-                'validTo' => date('Y-m-d H:i:s', $parsed['validTo_time_t'] ?? time()),
-                'serialNumber' => $parsed['serialNumberHex'] ?? ($parsed['serialNumber'] ?? 'N/A'),
-                'fingerprint_sha256' => $formattedSha256,
-                'fingerprints' => [
-                    'sha256' => $formattedSha256,
-                    'shal' => $formattedSha1
-                ],
-                'crl_status' => 'Vérifié : Non révoqué (Point de distribution CRL actif)',
-                'ocsp_status' => 'Réponse OCSP : Good (Certificat valide et actif)',
-                'tls_diagnostic' => 'Chaîne de confiance valide - Protocole TLS 1.3'
-            ];
-
-            return response()->json([
-                'success' => true,
-                'data' => $data
-            ]);
+        // Vide la file d'erreurs OpenSSL pour ne pas polluer les requêtes suivantes.
+        while (openssl_error_string() !== false) {
         }
 
-        // 3. Pool professionnel de certificats dynamiques et variés (sans mentions personnelles)
-        $profiles = [
-            [
-                'subject' => 'CN=api.secure-infrastructure.enterprise.net, OU=PKI Operations, O=Global Trust Network Solutions Ltd, L=New York, C=US',
-                'issuer' => 'CN=DigiCert Global Root CA, OU=Root CA Division, O=DigiCert Inc, C=US',
-                'serialNumber' => '04:A3:8F:92:B1:C4:7E:6D:99',
-            ],
-            [
-                'subject' => 'CN=auth.banking-gateway.fintech-global.org, OU=Digital Assets Dept, O=Global Financial Technologies, L=London, C=GB',
-                'issuer' => 'CN=Sectigo RSA Organization Validation Secure Server CA, O=Sectigo Limited, C=GB',
-                'serialNumber' => 'FF:91:2E:44:8A:B3:10:9C:AA',
-            ],
-            [
-                'subject' => 'CN=portal.cloud-datacenter-central.io, OU=Cloud Security, O=Central Datacenter Corp, L=Frankfurt, C=DE',
-                'issuer' => 'CN=Cloudflare Inc ECC CA-3, OU=Cloudflare TLS PKI, O=Cloudflare Inc, C=US',
-                'serialNumber' => '12:34:56:78:9A:BC:DE:F0:11',
-            ],
-            [
-                'subject' => 'CN=secure.ecurrency-exchange.net, OU=Payments Security, O=E-Currency Network, L=Tokyo, C=JP',
-                'issuer' => 'CN=Let\'s Encrypt Authority X3, O=Let\'s Encrypt, C=US',
-                'serialNumber' => '99:88:77:66:55:44:33:22:33',
-            ]
-        ];
+        if (! $cert || ! $parsed) {
+            return response()->json([
+                'success' => false,
+                'message' => "Certificat illisible : le texte n'est pas un certificat X.509 PEM valide.",
+            ], 422);
+        }
 
-        // Sélection automatique et changeante basée sur le contenu du PEM collé
-        $index = abs(crc32($pem)) % count($profiles);
-        $selectedProfile = $profiles[$index];
+        // --- Empreintes ---
+        $format = fn ($hex) => $hex ? implode(':', str_split(strtoupper($hex), 2)) : 'N/A';
+        $sha256 = $format(openssl_x509_fingerprint($cert, 'sha256'));
+        $sha1   = $format(openssl_x509_fingerprint($cert, 'sha1'));
 
-        // Génération d'empreintes cryptographiques uniques et aléatoires basées sur le texte fourni
-        $hash256 = strtoupper(hash('sha256', $pem));
-        $hash1 = strtoupper(hash('sha1', $pem));
-        
-        $formattedSha256 = implode(':', str_split($hash256, 2));
-        $formattedSha1 = implode(':', str_split($hash1, 2));
-        $serialHex = strtoupper(implode(':', str_split(substr($hash256, 0, 16), 2)));
+        // --- Identités ---
+        $subjectStr = $this->dn($parsed['subject'] ?? []);
+        $issuerStr  = $this->dn($parsed['issuer'] ?? []);
+        $selfSigned = ($parsed['subject'] ?? []) == ($parsed['issuer'] ?? []);
 
-        $data = [
-            'subject' => $selectedProfile['subject'],
-            'issuer' => $selectedProfile['issuer'],
-            'validFrom' => date('Y-m-d H:i:s', strtotime('-30 days')),
-            'validTo' => date('Y-m-d H:i:s', strtotime('+335 days')),
-            'serialNumber' => $serialHex,
-            'fingerprint_sha256' => $formattedSha256,
-            'fingerprints' => [
-                'sha256' => $formattedSha256,
-                'shal' => $formattedSha1
-            ],
-            'crl_status' => 'Vérifié : Non révoqué (Point de distribution CRL actif)',
-            'ocsp_status' => 'Réponse OCSP : Good (Certificat valide et actif)',
-            'tls_diagnostic' => 'Chaîne de confiance valide - Protocole TLS 1.3 avec chiffrement ECDHE_RSA'
-        ];
+        // --- Période de validité ---
+        $now       = time();
+        $notBefore = $parsed['validFrom_time_t'] ?? 0;
+        $notAfter  = $parsed['validTo_time_t'] ?? 0;
+
+        if ($now < $notBefore) {
+            $validityStatus = 'Pas encore valide';
+        } elseif ($now > $notAfter) {
+            $validityStatus = 'Expiré depuis ' . (int) floor(($now - $notAfter) / 86400) . ' jour(s)';
+        } else {
+            $validityStatus = 'Valide, expire dans ' . (int) floor(($notAfter - $now) / 86400) . ' jour(s)';
+        }
+
+        // --- Clé publique et signature ---
+        $details = [];
+        if ($pub = openssl_pkey_get_public($cert)) {
+            $details = openssl_pkey_get_details($pub) ?: [];
+        }
+        $bits    = $details['bits'] ?? null;
+        $keyType = match ($details['type'] ?? null) {
+            OPENSSL_KEYTYPE_RSA => 'RSA',
+            OPENSSL_KEYTYPE_EC  => 'EC',
+            OPENSSL_KEYTYPE_DSA => 'DSA',
+            default             => 'Inconnu',
+        };
+        $sigAlgo = $parsed['signatureTypeSN'] ?? ($parsed['signatureTypeLN'] ?? 'Inconnu');
+
+        // --- Numéro de série ---
+        $serialHex = strtoupper($parsed['serialNumberHex'] ?? '');
+        $serial    = $serialHex !== '' ? implode(':', str_split($serialHex, 2)) : 'N/A';
+
+        // --- CRL / OCSP (simulés, d'après les extensions réellement présentes) ---
+        $extensions = $parsed['extensions'] ?? [];
+        $revoked    = in_array($serialHex, self::DEMO_REVOKED_SERIALS, true);
+
+        if ($revoked) {
+            $crlStatus  = 'Révoqué (simulé : numéro de série présent dans la liste de démonstration)';
+            $ocspStatus = 'Réponse OCSP : Revoked (simulé)';
+        } else {
+            $crlStatus = isset($extensions['crlDistributionPoints'])
+                ? 'Point de distribution CRL présent. Vérification simulée : non révoqué'
+                : 'Aucun point de distribution CRL dans le certificat : vérification impossible';
+
+            $ocspStatus = str_contains($extensions['authorityInfoAccess'] ?? '', 'OCSP')
+                ? 'Répondeur OCSP déclaré. Vérification simulée : Good'
+                : 'Aucun répondeur OCSP déclaré dans le certificat : vérification impossible';
+        }
+
+        // --- Diagnostic TLS : constats réels sur le certificat ---
+        $diagnostics = [];
+        if ($now > $notAfter) {
+            $diagnostics[] = 'Certificat expiré : un navigateur le refuserait';
+        } elseif ($now < $notBefore) {
+            $diagnostics[] = "Certificat pas encore valide (date de début dans le futur)";
+        }
+        if ($selfSigned) {
+            $diagnostics[] = 'Auto-signé : aucune autorité de confiance ne le garantit (erreur de chaîne de confiance)';
+        }
+        if (preg_match('/md5|sha1/i', $sigAlgo)) {
+            $diagnostics[] = "Algorithme de signature faible ($sigAlgo)";
+        }
+        if ($keyType === 'RSA' && $bits !== null && $bits < 2048) {
+            $diagnostics[] = "Clé RSA trop courte ($bits bits, 2048 minimum recommandé)";
+        }
+        if (empty($diagnostics)) {
+            $diagnostics[] = 'Aucun problème détecté sur ce certificat';
+        }
 
         return response()->json([
             'success' => true,
-            'data' => $data
+            'data' => [
+                'subject'              => $subjectStr,
+                'issuer'               => $issuerStr,
+                'validFrom'            => gmdate('Y-m-d H:i:s', $notBefore) . ' UTC',
+                'validTo'              => gmdate('Y-m-d H:i:s', $notAfter) . ' UTC',
+                'validity_status'      => $validityStatus,
+                'serialNumber'         => $serial,
+                'key_info'             => $bits ? "$keyType $bits bits" : $keyType,
+                'signature_algorithm'  => $sigAlgo,
+                'fingerprint_sha256'   => $sha256,
+                'fingerprints'         => [
+                    'sha256' => $sha256,
+                    'sha1'   => $sha1,
+                ],
+                'crl_status'           => $crlStatus,
+                'ocsp_status'          => $ocspStatus,
+                'tls_diagnostic'       => implode(' ; ', $diagnostics),
+            ],
         ]);
+    }
+
+    /** Transforme un nom distinctif OpenSSL en texte "CN=..., O=...". */
+    private function dn(array $parts): string
+    {
+        return collect($parts)
+            ->map(fn ($v, $k) => $k . '=' . (is_array($v) ? implode('/', $v) : $v))
+            ->implode(', ');
     }
 }
